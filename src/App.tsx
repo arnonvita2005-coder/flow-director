@@ -7,9 +7,11 @@ import { ApiKeyModal } from './components/ApiKeyModal';
 import { FlowIntegrationHelper } from './components/FlowIntegrationHelper';
 import { MobileQrModal } from './components/MobileQrModal';
 import { CreatePersonaModal } from './components/CreatePersonaModal';
+import { BackupModal } from './components/BackupModal';
 import type { Persona, ShotConfig } from './types';
 import { INITIAL_PERSONAS, INITIAL_PROJECT } from './services/mockData';
 import { DEFAULT_NEGATIVE_PROMPT, compileVeoPrompt } from './services/promptCompiler';
+import { idbGet, idbSet, safeLocalStorageSet } from './services/storage';
 import { User, Clapperboard, Film, Copy, Check, ExternalLink } from 'lucide-react';
 
 export function App() {
@@ -51,6 +53,7 @@ export function App() {
   const [isHelperModalOpen, setIsHelperModalOpen] = useState(false);
   const [isMobileModalOpen, setIsMobileModalOpen] = useState(false);
   const [isCreateFriendModalOpen, setIsCreateFriendModalOpen] = useState(false);
+  const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
   const [isDockMode, setIsDockMode] = useState(false);
 
   // Mobile navigation tab state
@@ -59,20 +62,49 @@ export function App() {
 
   const localWifiIp = '192.168.1.47';
 
-  // Sync to localStorage
+  // Load from IndexedDB on initial mount
   useEffect(() => {
-    localStorage.setItem('flow_director_personas', JSON.stringify(personas));
+    async function loadFromDB() {
+      try {
+        const idbPersonas = await idbGet<Persona[]>('flow_director_personas');
+        if (idbPersonas && idbPersonas.length > 0) {
+          setPersonas(idbPersonas);
+        }
+        const idbShots = await idbGet<ShotConfig[]>('flow_director_shots');
+        if (idbShots && idbShots.length > 0) {
+          setShots(idbShots);
+        }
+        const idbKey = await idbGet<string>('flow_director_gemini_api_key');
+        if (idbKey) {
+          setApiKey(idbKey);
+        }
+      } catch (e) {
+        console.warn('[Storage] Failed to load from IndexedDB', e);
+      }
+    }
+    loadFromDB();
+  }, []);
+
+  // Sync to IndexedDB and localStorage safely
+  useEffect(() => {
+    idbSet('flow_director_personas', personas);
+    safeLocalStorageSet('flow_director_personas', JSON.stringify(personas));
   }, [personas]);
 
   useEffect(() => {
-    localStorage.setItem('flow_director_shots', JSON.stringify(shots));
+    idbSet('flow_director_shots', shots);
+    safeLocalStorageSet('flow_director_shots', JSON.stringify(shots));
   }, [shots]);
 
   useEffect(() => {
     if (apiKey) {
-      localStorage.setItem('flow_director_gemini_api_key', apiKey);
+      idbSet('flow_director_gemini_api_key', apiKey);
+      safeLocalStorageSet('flow_director_gemini_api_key', apiKey);
     } else {
-      localStorage.removeItem('flow_director_gemini_api_key');
+      idbSet('flow_director_gemini_api_key', '');
+      try {
+        localStorage.removeItem('flow_director_gemini_api_key');
+      } catch {}
     }
   }, [apiKey]);
 
@@ -138,6 +170,25 @@ export function App() {
     }
   };
 
+  const handleRestoreData = (newPersonas: Persona[], newShots: ShotConfig[], newApiKey?: string) => {
+    setPersonas(newPersonas);
+    if (newPersonas.length > 0) setActivePersonaId(newPersonas[0].id);
+    setShots(newShots);
+    if (newShots.length > 0) setActiveShotId(newShots[0].id);
+    if (newApiKey !== undefined) setApiKey(newApiKey);
+  };
+
+  const handleResetData = () => {
+    setPersonas(INITIAL_PERSONAS);
+    setActivePersonaId(INITIAL_PERSONAS[0].id);
+    setShots(INITIAL_PROJECT.shots);
+    setActiveShotId(INITIAL_PROJECT.shots[0].id);
+    try {
+      localStorage.removeItem('flow_director_personas');
+      localStorage.removeItem('flow_director_shots');
+    } catch {}
+  };
+
   const handleMobileCopyPrompt = async () => {
     const prompt = compileVeoPrompt(activeShot, activePersona, activeShotIndex, shots.length > 1, personas);
     await navigator.clipboard.writeText(prompt);
@@ -155,9 +206,10 @@ export function App() {
         onOpenApiKeyModal={() => setIsApiKeyModalOpen(true)}
         onOpenHelperModal={() => setIsHelperModalOpen(true)}
         onOpenMobileModal={() => setIsMobileModalOpen(true)}
+        onOpenCreatePersonaModal={() => setIsCreateFriendModalOpen(true)}
+        onOpenBackupModal={() => setIsBackupModalOpen(true)}
         isDockMode={isDockMode}
         onToggleDockMode={() => setIsDockMode((prev) => !prev)}
-        onOpenCreatePersonaModal={() => setIsCreateFriendModalOpen(true)}
         hasApiKey={Boolean(apiKey)}
       />
 
@@ -313,6 +365,16 @@ export function App() {
         onClose={() => setIsCreateFriendModalOpen(false)}
         onSave={handleCreateFriend}
         apiKey={apiKey}
+      />
+
+      <BackupModal
+        isOpen={isBackupModalOpen}
+        onClose={() => setIsBackupModalOpen(false)}
+        personas={personas}
+        shots={shots}
+        apiKey={apiKey}
+        onRestoreData={handleRestoreData}
+        onResetData={handleResetData}
       />
     </div>
   );

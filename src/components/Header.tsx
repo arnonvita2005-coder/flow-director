@@ -8,7 +8,8 @@ import {
   Users, 
   Smartphone,
   Columns,
-  UserPlus
+  UserPlus,
+  Database
 } from 'lucide-react';
 import type { Persona } from '../types';
 
@@ -20,6 +21,7 @@ interface HeaderProps {
   onOpenHelperModal: () => void;
   onOpenMobileModal: () => void;
   onOpenCreatePersonaModal?: () => void;
+  onOpenBackupModal: () => void;
   isDockMode: boolean;
   onToggleDockMode: () => void;
   hasApiKey: boolean;
@@ -33,6 +35,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenHelperModal,
   onOpenMobileModal,
   onOpenCreatePersonaModal,
+  onOpenBackupModal,
   isDockMode,
   onToggleDockMode,
   hasApiKey
@@ -86,6 +89,16 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Action Controls */}
         <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* Storage & Auto-save Status button */}
+          <button
+            onClick={onOpenBackupModal}
+            title="ระบบบันทึกอัตโนมัติ (ไม่ต้องถ่ายใหม่) & สำรองข้อมูล"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+          >
+            <Database className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">บันทึกอัตโนมัติ</span>
+          </button>
+
           {/* Mobile Access button */}
           <button
             onClick={onOpenMobileModal}

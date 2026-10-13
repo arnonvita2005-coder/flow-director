@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, UserPlus, Upload, Sparkles, RefreshCw, Check, Camera, ShieldCheck } from 'lucide-react';
 import type { Persona } from '../types';
 import { analyzeFaceWithGemini } from '../services/promptCompiler';
+import { compressImage } from '../services/storage';
 
 interface CreatePersonaModalProps {
   isOpen: boolean;
@@ -33,17 +34,17 @@ export const CreatePersonaModal: React.FC<CreatePersonaModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const result = ev.target?.result as string;
-      setPhotoUrl(result);
+    try {
+      const compressed = await compressImage(file, 720, 720, 0.82);
+      setPhotoUrl(compressed);
       setScanDone(false);
-    };
-    reader.readAsDataURL(file);
+    } catch (err) {
+      console.error('Failed to compress image', err);
+    }
   };
 
   const handleAutoScan = async () => {

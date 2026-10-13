@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import type { Persona, WardrobePreset, PropAsset } from '../types';
 import { analyzeFaceWithGemini } from '../services/promptCompiler';
+import { compressImage } from '../services/storage';
 
 interface PersonaManagerProps {
   persona: Persona;
@@ -38,13 +39,12 @@ export const PersonaManager: React.FC<PersonaManagerProps> = ({
   const [isScanningFace, setIsScanningFace] = useState(false);
   const [scanSuccessMessage, setScanSuccessMessage] = useState('');
 
-  const handleFileUpload = (angle: 'front' | 'angle_45' | 'profile' | 'close_up', e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (angle: 'front' | 'angle_45' | 'profile' | 'close_up', e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const url = event.target?.result as string;
+    try {
+      const url = await compressImage(file, 720, 720, 0.82);
       const updatedRefs = persona.referenceImages.map((ref) =>
         ref.angle === angle ? { ...ref, url } : ref
       );
@@ -53,8 +53,9 @@ export const PersonaManager: React.FC<PersonaManagerProps> = ({
         referenceImages: updatedRefs,
         avatarUrl: angle === 'front' ? url : persona.avatarUrl
       });
-    };
-    reader.readAsDataURL(file);
+    } catch (err) {
+      console.error('Failed to compress turnaround image', err);
+    }
   };
 
   const handleUpdateDna = (field: keyof Persona['faceDna'], value: string) => {
@@ -546,12 +547,15 @@ export const PersonaManager: React.FC<PersonaManagerProps> = ({
                       type="file"
                       accept="image/*"
                       className="hidden"
-                      onChange={(e) => {
+                      onChange={async (e) => {
                         const file = e.target.files?.[0];
                         if (!file) return;
-                        const reader = new FileReader();
-                        reader.onload = (ev) => setNewPropPhoto(ev.target?.result as string);
-                        reader.readAsDataURL(file);
+                        try {
+                          const compressed = await compressImage(file, 720, 720, 0.82);
+                          setNewPropPhoto(compressed);
+                        } catch (err) {
+                          console.error('Failed to compress prop image', err);
+                        }
                       }}
                     />
                   </label>

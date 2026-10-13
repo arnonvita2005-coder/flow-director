@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Flow Director Companion",
+  "version": "1.0.0",
+  "description": "Companion tool to inject Face Anchored Prompts and Storyboards directly into Google Flow (flow.google)",
+  "permissions": [
+    "clipboardRead"
+  ],
+  "host_permissions": [
+    "https://flow.google/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Flow Director"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://flow.google/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

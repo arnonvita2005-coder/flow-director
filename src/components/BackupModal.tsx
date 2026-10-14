@@ -17,7 +17,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
   onClose,
   personas,
   shots,
-  apiKey,
+  apiKey: _apiKey,
   onRestoreData,
   onResetData
 }) => {
@@ -33,12 +33,12 @@ export const BackupModal: React.FC<BackupModalProps> = ({
 
   const handleExport = () => {
     try {
+      // Priority 5: Never include API Key in exported backup files
       const backupData = {
-        version: '1.0',
+        version: '1.1',
         exportedAt: new Date().toISOString(),
         personas,
-        shots,
-        apiKey: apiKey || undefined
+        shots
       };
 
       const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(backupData, null, 2));
@@ -49,7 +49,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
       downloadAnchor.click();
       downloadAnchor.remove();
 
-      setSuccessMessage('ดาวน์โหลดไฟล์สำรองข้อมูล (JSON) เรียบร้อยแล้ว!');
+      setSuccessMessage('ดาวน์โหลดไฟล์สำรองข้อมูล (JSON) เรียบร้อยแล้ว! (ไม่รวม API Key เพื่อความปลอดภัย)');
       setTimeout(() => setSuccessMessage(''), 4000);
     } catch {
       setErrorMessage('เกิดข้อผิดพลาดในการส่งออกข้อมูล');
@@ -70,7 +70,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
           throw new Error('โครงสร้างไฟล์ไม่ถูกต้อง');
         }
 
-        onRestoreData(parsed.personas, parsed.shots || shots, parsed.apiKey);
+        onRestoreData(parsed.personas, parsed.shots || shots, undefined);
         setSuccessMessage('กู้คืนข้อมูลตัวละครและพร็อพทั้งหมดสำเร็จ!');
         setTimeout(() => {
           setSuccessMessage('');

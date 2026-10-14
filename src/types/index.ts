@@ -22,6 +22,27 @@ export interface PropAsset {
   description: string;
 }
 
+export interface ImageQualityReport {
+  isAcceptable: boolean;
+  brightness: 'too_dark' | 'good' | 'too_bright';
+  sharpness: 'blurry' | 'acceptable' | 'sharp';
+  resolution: 'low' | 'good' | 'high';
+  warnings: string[];
+  score: number; // 0 - 100
+}
+
+export type StoryGenre = 
+  | 'travel'
+  | 'comedy'
+  | 'birthday'
+  | 'birthday_party'
+  | 'cinematic'
+  | 'cinematic_movie'
+  | 'lifestyle'
+  | 'daily_vlog'
+  | 'action'
+  | 'action_hero';
+
 export interface Persona {
   id: string;
   name: string;
@@ -32,11 +53,13 @@ export interface Persona {
     url: string;
     angle: 'front' | 'angle_45' | 'profile' | 'close_up';
     label: string;
+    qualityReport?: ImageQualityReport;
   }[];
   faceDna: FaceDNA;
   wardrobes: WardrobePreset[];
   activeWardrobeId: string;
   props: PropAsset[];
+  consentGiven?: boolean;
 }
 
 export type ShotFraming = 

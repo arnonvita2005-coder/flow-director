@@ -1,4 +1,4 @@
-import type { Persona, ShotConfig, ShotFraming, CameraMovement, LightingAtmosphere, LensAesthetic } from '../types';
+import type { Persona, ShotConfig, ShotFraming, CameraMovement, LightingAtmosphere, LensAesthetic, StoryGenre } from '../types';
 
 export const FRAMING_DESCRIPTIONS: Record<ShotFraming, { label: string; prompt: string }> = {
   extreme_close_up: { label: 'Extreme Close-Up (ตา/ใบหน้าชัดเจน)', prompt: 'extreme cinematic macro close-up shot focused on eyes and facial micro-expressions' },
@@ -46,7 +46,7 @@ export const DEFAULT_NEGATIVE_PROMPT =
   'face distortion, face morphing, duplicate faces, asymmetrical eyes, distorted eyes, bad anatomy, extra limbs, fused fingers, cartoon, 3d render, anime, blurry, low resolution, bad proportions, unnatural head shape, jittery movement, temporal inconsistency, plastic skin texture, face bleeding, blended faces, merged facial features, clone glitch, multiple heads';
 
 /**
- * Builds the Face Consistency Anchor formula
+ * Builds the Face Consistency Anchor formula (Strictly Facial Identity, decoupled from wardrobe)
  */
 export function buildFaceAnchor(persona: Persona): string {
   const dna = persona.faceDna;
@@ -60,13 +60,21 @@ export function buildFaceAnchor(persona: Persona): string {
   if (dna.facialHair && dna.facialHair.toLowerCase() !== 'none') parts.push(`facial hair: ${dna.facialHair}`);
   if (dna.signatureFeatures) parts.push(`distinctive features: ${dna.signatureFeatures}`);
 
-  // Active Wardrobe
-  const activeWardrobe = persona.wardrobes.find((w) => w.id === persona.activeWardrobeId);
-  if (activeWardrobe) {
-    parts.push(`attire: wearing ${activeWardrobe.name} (${activeWardrobe.description})`);
-  }
-
   return parts.join(', ');
+}
+
+/**
+ * Builds the Wardrobe Anchor independently from Face Identity
+ */
+export function buildWardrobeAnchor(persona: Persona, customOutfit?: string): string {
+  if (customOutfit && customOutfit.trim()) {
+    return `Attire: wearing ${customOutfit}`;
+  }
+  const activeWardrobe = persona.wardrobes?.find((w) => w.id === persona.activeWardrobeId);
+  if (activeWardrobe) {
+    return `Attire: wearing ${activeWardrobe.name} (${activeWardrobe.description})`;
+  }
+  return '';
 }
 
 /**
@@ -80,6 +88,7 @@ export function compileVeoPrompt(
   allPersonas: Persona[] = []
 ): string {
   const primaryFaceAnchor = buildFaceAnchor(persona);
+  const primaryWardrobe = buildWardrobeAnchor(persona);
   const framing = shot.framing ? FRAMING_DESCRIPTIONS[shot.framing].prompt : FRAMING_DESCRIPTIONS.medium_close_up.prompt;
   const camera = shot.cameraMovement ? CAMERA_DESCRIPTIONS[shot.cameraMovement].prompt : CAMERA_DESCRIPTIONS.slow_dolly_in.prompt;
   const lighting = shot.lighting ? LIGHTING_DESCRIPTIONS[shot.lighting].prompt : LIGHTING_DESCRIPTIONS.golden_hour.prompt;
@@ -107,7 +116,10 @@ export function compileVeoPrompt(
 
   let castSection = `Subject: ${primaryFaceAnchor}`;
   if (secondaryPersonas.length > 0) {
-    const friendAnchors = secondaryPersonas.map((friend) => buildFaceAnchor(friend)).join('; AND co-star: ');
+    const friendAnchors = secondaryPersonas.map((friend) => {
+      const fWardrobe = buildWardrobeAnchor(friend);
+      return `${buildFaceAnchor(friend)}${fWardrobe ? `, ${fWardrobe}` : ''}`;
+    }).join('; AND co-star: ');
     const interaction = shot.characterInteraction || 'interacting naturally, laughing, talking, and enjoying the moment together';
     castSection = `Ensemble Scene: Primary protagonist ${persona.name} (${primaryFaceAnchor}) TOGETHER WITH co-star(s) ${friendAnchors}. Group interaction: ${interaction}. Identity Disambiguation: each person must maintain their separate, distinct facial features, hair, and unique outfits without facial blending or face morphing`;
   }
@@ -121,6 +133,7 @@ export function compileVeoPrompt(
   const promptSections = [
     `Cinematic film clip: ${continuityTag}`,
     castSection,
+    primaryWardrobe,
     propSection,
     `Action & Mood: ${userAction}, ${emotion}`,
     `Environment & Setting: ${environment}`,
@@ -285,10 +298,11 @@ Extract fine visual attributes and return ONLY valid JSON matching this schema:
 
 /**
  * 1-Click Storyboard Generator (3-Shot Narrative Sequences)
+ * Supports all Story Genres with high visual continuity & character lock
  */
 export async function generateFullStoryboardWithAI(
   topic: string,
-  templateType: 'podcast' | 'travel' | 'tech_review' | 'cinematic_story',
+  templateType: StoryGenre | 'podcast' | 'travel' | 'tech_review' | 'cinematic_story' | string,
   persona: Persona,
   apiKey?: string
 ): Promise<ShotConfig[]> {
@@ -296,7 +310,7 @@ export async function generateFullStoryboardWithAI(
   if (apiKey && topic.trim()) {
     try {
       const systemInstruction = `You are an elite cinema director producing a 3-shot video sequence for Google Veo/Flow.
-Given a topic, create exactly 3 sequential shots with visual continuity.
+Given a topic and genre ("${templateType}"), create exactly 3 sequential shots with visual continuity and consistent character identity.
 Return ONLY valid JSON array with 3 objects matching this schema:
 [
   {
@@ -304,8 +318,8 @@ Return ONLY valid JSON array with 3 objects matching this schema:
     "userPrompt": "Thai or English summary",
     "framing": "medium_shot" | "close_up" | "wide_shot" | "cowboy_shot",
     "cameraMovement": "slow_dolly_in" | "steadycam_tracking" | "dynamic_orbit" | "static_tripod",
-    "lighting": "golden_hour" | "cinematic_neon_cyberpunk" | "soft_studio_light" | "moody_rim_lighting",
-    "lens": "35mm_anamorphic" | "85mm_portrait_bokeh" | "50mm_natural",
+    "lighting": "golden_hour" | "cinematic_neon_cyberpunk" | "soft_studio_light" | "moody_rim_lighting" | "direct_sunlight_sharp",
+    "lens": "35mm_anamorphic" | "85mm_portrait_bokeh" | "50mm_natural" | "24mm_wide_cinematic",
     "motionPacing": "smooth_slowmo" | "cinematic_standard",
     "sceneEnvironment": "detailed environment in English",
     "characterAction": "precise action in English",
@@ -318,7 +332,7 @@ Return ONLY valid JSON array with 3 objects matching this schema:
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: `${systemInstruction}\n\nCharacter: ${persona.name}\nTopic: ${topic}\nStyle: ${templateType}` }] }],
+          contents: [{ parts: [{ text: `${systemInstruction}\n\nCharacter Name: ${persona.name}\nGenre: ${templateType}\nUser Story Idea: ${topic}` }] }],
           generationConfig: { responseMimeType: 'application/json' }
         })
       });
@@ -353,6 +367,278 @@ Return ONLY valid JSON array with 3 objects matching this schema:
 
   // Pre-crafted master Hollywood templates
   const timestamp = Date.now();
+
+  // 1. Comedy Genre
+  if (templateType === 'comedy') {
+    return [
+      {
+        id: `shot_${timestamp}_1`,
+        title: 'Shot 1: The Setup (จังหวะเปิดเรื่อง)',
+        userPrompt: 'เดินเข้ามาในฉากด้วยสีหน้าทะเล้น ยิ้มกวนๆ พร้อมส่งสายตาตลกใส่กล้อง',
+        framing: 'medium_shot',
+        cameraMovement: 'steadycam_tracking',
+        lighting: 'direct_sunlight_sharp',
+        lens: '35mm_anamorphic',
+        motionPacing: 'cinematic_standard',
+        sceneEnvironment: 'bright vibrant outdoor terrace with colorful umbrellas and cheerful background atmosphere',
+        characterAction: 'walking forward with a playful comedic swagger, tipping sunglasses down and winking',
+        characterEmotion: 'playful, mischievous, funny charismatic smile',
+        durationSeconds: 5,
+        compiledPrompt: '',
+        negativePrompt: DEFAULT_NEGATIVE_PROMPT
+      },
+      {
+        id: `shot_${timestamp}_2`,
+        title: 'Shot 2: The Punchline (ปล่อยมุกฮา)',
+        userPrompt: 'กล้องโคลสอัพที่ใบหน้า ทำหน้าเหวอแล้วหลุดหัวเราะอย่างร่าเริง',
+        framing: 'close_up',
+        cameraMovement: 'slow_dolly_in',
+        lighting: 'golden_hour',
+        lens: '85mm_portrait_bokeh',
+        motionPacing: 'smooth_slowmo',
+        sceneEnvironment: 'sunny outdoor setting with warm bokeh highlights',
+        characterAction: 'reacting with hilarious surprise expression, then bursting into genuine contagious laughter',
+        characterEmotion: 'pure joy, uncontrolled laughter, highly expressive face',
+        durationSeconds: 5,
+        compiledPrompt: '',
+        negativePrompt: DEFAULT_NEGATIVE_PROMPT
+      },
+      {
+        id: `shot_${timestamp}_3`,
+        title: 'Shot 3: The Celebration (สนุกสนานเฮฮา)',
+        userPrompt: 'กล้องมุมกว้างขึ้น หัวเราะกับเพื่อนหรือทำท่าดีใจสุดเหวี่ยง',
+        framing: 'cowboy_shot',
+        cameraMovement: 'dynamic_orbit',
+        lighting: 'golden_hour',
+        lens: '35mm_anamorphic',
+        motionPacing: 'cinematic_standard',
+        sceneEnvironment: 'lively outdoor gathering with golden sunset glow',
+        characterAction: 'throwing hands up in triumphant comedic victory, laughing together with effortless charm',
+        characterEmotion: 'high energy, cheerful, celebratory mood',
+        durationSeconds: 5,
+        compiledPrompt: '',
+        negativePrompt: DEFAULT_NEGATIVE_PROMPT
+      }
+    ];
+  }
+
+  // 2. Birthday / Celebration Genre
+  if (templateType === 'birthday') {
+    return [
+      {
+        id: `shot_${timestamp}_1`,
+        title: 'Shot 1: The Arrival & Surprise (ก้าวเข้าสู่งาน)',
+        userPrompt: 'เดินเปิดประตูเข้ามาในห้องจัดงาน ตกแต่งลูกโป่งและแสงไฟระยิบระยับ',
+        framing: 'medium_shot',
+        cameraMovement: 'slow_dolly_in',
+        lighting: 'soft_studio_light',
+        lens: '35mm_anamorphic',
+        motionPacing: 'smooth_slowmo',
+        sceneEnvironment: 'beautifully decorated birthday party room with floating balloons, fairy lights, and warm celebratory atmosphere',
+        characterAction: 'walking in with hands gently raised to heart, eyes widening in delightful surprise',
+        characterEmotion: 'touched, overwhelmed with happiness, radiant smile',
+        durationSeconds: 5,
+        compiledPrompt: '',
+        negativePrompt: DEFAULT_NEGATIVE_PROMPT
+      },
+      {
+        id: `shot_${timestamp}_2`,
+        title: 'Shot 2: The Candle Wish (อธิษฐานเป่าเทียน)',
+        userPrompt: 'ยืนหน้าเค้กวันเกิด หลับตาอธิษฐานแล้วเป่าเทียนด้วยรอยยิ้มอบอุ่น',
+        framing: 'close_up',
+        cameraMovement: 'static_tripod',
+        lighting: 'moody_rim_lighting',
+        lens: '85mm_portrait_bokeh',
+        motionPacing: 'smooth_slowmo',
+        sceneEnvironment: 'soft candlelit birthday cake scene with glowing warm flame reflections on the face',
+        characterAction: 'closing eyes gently for a quiet wish, then blowing out birthday cake candles as warm smoke drifts up softly',
+        characterEmotion: 'peaceful, deeply grateful, sincere warmth',
+        durationSeconds: 5,
+        compiledPrompt: '',
+        negativePrompt: DEFAULT_NEGATIVE_PROMPT
+      },
+      {
+        id: `shot_${timestamp}_3`,
+        title: 'Shot 3: Cheers & Cheers (ชนแก้วฉลอง)',
+        userPrompt: 'ยกแก้วฉลอง กล้องหมุนรอบตัว รอยยิ้มสดใสพร้อมเสียงหัวเราะ',
+        framing: 'medium_close_up',
+        cameraMovement: 'dynamic_orbit',
+        lighting: 'golden_hour',
+        lens: '50mm_natural',
+        motionPacing: 'cinematic_standard',
+        sceneEnvironment: 'joyous celebration room filled with confetti and golden ambient glow',
+        characterAction: 'raising glass in celebratory toast towards camera, smiling warmly with sparkles in eyes',
+        characterEmotion: 'ecstatic, festive, charismatic joy',
+        durationSeconds: 5,
+        compiledPrompt: '',
+        negativePrompt: DEFAULT_NEGATIVE_PROMPT
+      }
+    ];
+  }
+
+  // 3. Action / Boat Adventure Genre
+  if (templateType === 'action') {
+    return [
+      {
+        id: `shot_${timestamp}_1`,
+        title: 'Shot 1: Launch & Acceleration (ออกตัวลุย)',
+        userPrompt: 'ยืนประจำตำแหน่งบนเรือหรือยานพาหนะ ลมพัดผม สายตามุ่งมั่น',
+        framing: 'cowboy_shot',
+        cameraMovement: 'steadycam_tracking',
+        lighting: 'direct_sunlight_sharp',
+        lens: '24mm_wide_cinematic',
+        motionPacing: 'fast_action',
+        sceneEnvironment: 'open turquoise ocean waters with sun glinting off white wave crests and dramatic blue sky',
+        characterAction: 'holding the helm firmly, bracing against the ocean wind with jacket fluttering briskly',
+        characterEmotion: 'intense, focused, fearless determination',
+        durationSeconds: 5,
+        compiledPrompt: '',
+        negativePrompt: DEFAULT_NEGATIVE_PROMPT
+      },
+      {
+        id: `shot_${timestamp}_2`,
+        title: 'Shot 2: Full Throttle (เร่งความเร็วเต็มสูบ)',
+        userPrompt: 'กล้องโคลสอัพที่ใบหน้า ละอองน้ำกระเซ็น แววตาคมกริบ',
+        framing: 'close_up',
+        cameraMovement: 'handheld_cinematic',
+        lighting: 'golden_hour',
+        lens: '85mm_portrait_bokeh',
+        motionPacing: 'fast_action',
+        sceneEnvironment: 'rapidly moving boat cutting through sea spray with golden sunset rim light defining the face',
+        characterAction: 'turning head sharply into the wind, locking confident eyes forward with adrenaline focus',
+        characterEmotion: 'unshakable courage and exhilarating thrill',
+        durationSeconds: 5,
+        compiledPrompt: '',
+        negativePrompt: DEFAULT_NEGATIVE_PROMPT
+      },
+      {
+        id: `shot_${timestamp}_3`,
+        title: 'Shot 3: Sunset Horizon (มุ่งสู่ขอบฟ้า)',
+        userPrompt: 'เรือแล่นแหวกคลื่นมุ่งหน้าสู่พระอาทิตย์ตกดิน ทัศนียภาพกว้างใหญ่ทรงพลัง',
+        framing: 'wide_shot',
+        cameraMovement: 'crane_boom_down',
+        lighting: 'golden_hour',
+        lens: '35mm_anamorphic',
+        motionPacing: 'smooth_slowmo',
+        sceneEnvironment: 'epic panoramic seascape bathed in crimson and gold sunset reflections across endless waters',
+        characterAction: 'standing proudly at the bow as the vessel glides smoothly across the golden water surface',
+        characterEmotion: 'triumphant, majestic, calm mastery',
+        durationSeconds: 5,
+        compiledPrompt: '',
+        negativePrompt: DEFAULT_NEGATIVE_PROMPT
+      }
+    ];
+  }
+
+  // 4. Daily Lifestyle Genre
+  if (templateType === 'lifestyle') {
+    return [
+      {
+        id: `shot_${timestamp}_1`,
+        title: 'Shot 1: Morning Coffee (เริ่มวันใหม่ที่คาเฟ่)',
+        userPrompt: 'นั่งริมหน้าต่างคาเฟ่กระจกใส แสงแดดอุ่นส่อง แตะถ้วยกาแฟเซรามิก',
+        framing: 'medium_shot',
+        cameraMovement: 'slow_dolly_in',
+        lighting: 'soft_studio_light',
+        lens: '50mm_natural',
+        motionPacing: 'smooth_slowmo',
+        sceneEnvironment: 'minimalist sunlit cafe interior with wooden tables and leafy indoor plants in soft focus',
+        characterAction: 'holding warm coffee cup with both hands, looking outside window with peaceful morning contemplation',
+        characterEmotion: 'serene, grounded, cozy contentment',
+        durationSeconds: 5,
+        compiledPrompt: '',
+        negativePrompt: DEFAULT_NEGATIVE_PROMPT
+      },
+      {
+        id: `shot_${timestamp}_2`,
+        title: 'Shot 2: The Sincere Smile (รอยยิ้มทักทาย)',
+        userPrompt: 'หันหน้ามามองกล้องแล้วยิ้มทักทายอย่างเป็นกันเองและผ่อนคลาย',
+        framing: 'close_up',
+        cameraMovement: 'static_tripod',
+        lighting: 'golden_hour',
+        lens: '85mm_portrait_bokeh',
+        motionPacing: 'smooth_slowmo',
+        sceneEnvironment: 'natural diffused morning light filtering through linen curtains',
+        characterAction: 'taking a gentle sip of coffee, putting cup down and looking directly at camera with a welcoming soft smile',
+        characterEmotion: 'authentic, approachable, effortlessly charming',
+        durationSeconds: 5,
+        compiledPrompt: '',
+        negativePrompt: DEFAULT_NEGATIVE_PROMPT
+      },
+      {
+        id: `shot_${timestamp}_3`,
+        title: 'Shot 3: City Stroll (ก้าวเดินรับลมชิลล์)',
+        userPrompt: 'ก้าวเดินออกจากร้าน เดินเล่นริมฟุตบาทรับลมเย็นสบาย',
+        framing: 'medium_close_up',
+        cameraMovement: 'steadycam_tracking',
+        lighting: 'golden_hour',
+        lens: '35mm_anamorphic',
+        motionPacing: 'smooth_slowmo',
+        sceneEnvironment: 'tree-lined city boulevard with gentle dappled afternoon sunlight',
+        characterAction: 'walking smoothly forward with hands casually tucked in pockets, taking in the city vibe',
+        characterEmotion: 'lighthearted, refreshed, satisfied',
+        durationSeconds: 5,
+        compiledPrompt: '',
+        negativePrompt: DEFAULT_NEGATIVE_PROMPT
+      }
+    ];
+  }
+
+  // 5. Travel Genre (Default for Travel or ท่องเที่ยว)
+  if (templateType === 'travel') {
+    return [
+      {
+        id: `shot_${timestamp}_1`,
+        title: 'Shot 1: The Arrival (มาถึงสถานที่)',
+        userPrompt: 'เดินก้าวเข้าสู่ถนนสายคึกคักหรือชายหาด มองรอบๆ ด้วยความตื่นเต้น',
+        framing: 'wide_shot',
+        cameraMovement: 'steadycam_tracking',
+        lighting: 'golden_hour',
+        lens: '24mm_wide_cinematic',
+        motionPacing: 'smooth_slowmo',
+        sceneEnvironment: 'atmospheric scenic coastal travel location bathed in warm golden hour sunlight with gentle breeze',
+        characterAction: 'walking forward with effortless swagger, looking around in awe',
+        characterEmotion: 'wonder, excitement, adventurous vibe',
+        durationSeconds: 5,
+        compiledPrompt: '',
+        negativePrompt: DEFAULT_NEGATIVE_PROMPT
+      },
+      {
+        id: `shot_${timestamp}_2`,
+        title: 'Shot 2: The Stroll (เดินชิลล์)',
+        userPrompt: 'เดินถือแว่นกันแดดหรือกระเป๋า กล้องเดินตามด้านหน้าแบบสมูท',
+        framing: 'medium_shot',
+        cameraMovement: 'steadycam_tracking',
+        lighting: 'golden_hour',
+        lens: '35mm_anamorphic',
+        motionPacing: 'smooth_slowmo',
+        sceneEnvironment: 'scenic street alley lined with artisan cafes and lanterns glowing',
+        characterAction: 'walking smoothly towards camera, occasional glance towards local storefronts',
+        characterEmotion: 'relaxed, stylish, completely in the element',
+        durationSeconds: 5,
+        compiledPrompt: '',
+        negativePrompt: DEFAULT_NEGATIVE_PROMPT
+      },
+      {
+        id: `shot_${timestamp}_3`,
+        title: 'Shot 3: Sunset Gaze (ดื่มด่ำวิวเย็น)',
+        userPrompt: 'หยุดยืนมองวิวพระอาทิตย์ตก แสงแดดสีทองส่องขอบผม',
+        framing: 'close_up',
+        cameraMovement: 'dynamic_orbit',
+        lighting: 'golden_hour',
+        lens: '85mm_portrait_bokeh',
+        motionPacing: 'smooth_slowmo',
+        sceneEnvironment: 'panoramic viewpoint overlooking sea or city skyline bathed in amber dusk sky',
+        characterAction: 'pausing and smiling gently into the sunset breeze as camera orbits 45 degrees',
+        characterEmotion: 'pure tranquility and genuine happiness',
+        durationSeconds: 5,
+        compiledPrompt: '',
+        negativePrompt: DEFAULT_NEGATIVE_PROMPT
+      }
+    ];
+  }
+
+  // 6. Podcast / Discussion Genre
   if (templateType === 'podcast') {
     return [
       {
@@ -406,60 +692,7 @@ Return ONLY valid JSON array with 3 objects matching this schema:
     ];
   }
 
-  if (templateType === 'travel') {
-    return [
-      {
-        id: `shot_${timestamp}_1`,
-        title: 'Shot 1: The Arrival (มาถึงสถานที่)',
-        userPrompt: 'เดินก้าวเข้าสู่ถนนสายคึกคัก มองรอบๆ ด้วยความตื่นเต้น',
-        framing: 'wide_shot',
-        cameraMovement: 'steadycam_tracking',
-        lighting: 'golden_hour',
-        lens: '24mm_wide_cinematic',
-        motionPacing: 'smooth_slowmo',
-        sceneEnvironment: 'atmospheric historic street bathed in warm golden hour sunlight with pedestrians in soft focus background',
-        characterAction: 'walking forward with effortless swagger, looking around in awe',
-        characterEmotion: 'wonder, excitement, adventurous vibe',
-        durationSeconds: 5,
-        compiledPrompt: '',
-        negativePrompt: DEFAULT_NEGATIVE_PROMPT
-      },
-      {
-        id: `shot_${timestamp}_2`,
-        title: 'Shot 2: The Stroll (เดินชิลล์)',
-        userPrompt: 'เดินถือเครื่องดื่มหรือกระเป๋า กล้องเดินตามด้านหน้าแบบสมูท',
-        framing: 'medium_shot',
-        cameraMovement: 'steadycam_tracking',
-        lighting: 'golden_hour',
-        lens: '35mm_anamorphic',
-        motionPacing: 'smooth_slowmo',
-        sceneEnvironment: 'scenic street alley lined with artisan cafes and lanterns glowing',
-        characterAction: 'walking smoothly towards camera, occasional glance towards local storefronts',
-        characterEmotion: 'relaxed, stylish, completely in the element',
-        durationSeconds: 5,
-        compiledPrompt: '',
-        negativePrompt: DEFAULT_NEGATIVE_PROMPT
-      },
-      {
-        id: `shot_${timestamp}_3`,
-        title: 'Shot 3: Sunset Gaze (ดื่มด่ำวิวเย็น)',
-        userPrompt: 'หยุดยืนมองวิวพระอาทิตย์ตก แสงแดดสีทองส่องขอบผม',
-        framing: 'close_up',
-        cameraMovement: 'dynamic_orbit',
-        lighting: 'golden_hour',
-        lens: '85mm_portrait_bokeh',
-        motionPacing: 'smooth_slowmo',
-        sceneEnvironment: 'panoramic viewpoint overlooking city skyline bathed in amber dusk sky',
-        characterAction: 'pausing and smiling gently into the sunset breeze as camera orbits 45 degrees',
-        characterEmotion: 'pure tranquility and genuine happiness',
-        durationSeconds: 5,
-        compiledPrompt: '',
-        negativePrompt: DEFAULT_NEGATIVE_PROMPT
-      }
-    ];
-  }
-
-  // Default Cinematic Story
+  // Default Cinematic Story (for 'cinematic', 'cinematic_story', and all other inputs)
   return [
     {
       id: `shot_${timestamp}_1`,

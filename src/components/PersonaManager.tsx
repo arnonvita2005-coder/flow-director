@@ -13,11 +13,14 @@ import {
   Package,
   Image as ImageIcon,
   Edit2,
-  UserPlus
+  UserPlus,
+  Star,
+  Lock
 } from 'lucide-react';
 import type { Persona, WardrobePreset, PropAsset } from '../types';
 import { analyzeFaceWithGemini } from '../services/promptCompiler';
 import { compressImage } from '../services/storage';
+import { checkImageQuality } from '../utils/imageQualityChecker';
 
 interface PersonaManagerProps {
   persona: Persona;
@@ -25,6 +28,7 @@ interface PersonaManagerProps {
   onSelectPersona: (personaId: string) => void;
   onOpenCreatePersonaModal: () => void;
   onUpdatePersona: (updated: Persona) => void;
+  onSetMainPersona?: (personaId: string) => void;
   onDeletePersona?: (personaId: string) => void;
   apiKey?: string;
 }
@@ -35,6 +39,7 @@ export const PersonaManager: React.FC<PersonaManagerProps> = ({
   onSelectPersona,
   onOpenCreatePersonaModal,
   onUpdatePersona,
+  onSetMainPersona,
   onDeletePersona,
   apiKey
 }) => {
@@ -77,18 +82,52 @@ export const PersonaManager: React.FC<PersonaManagerProps> = ({
 
     try {
       const url = await compressImage(file, 720, 720, 0.82);
-      const updatedRefs = persona.referenceImages.map((ref) =>
-        ref.angle === angle ? { ...ref, url } : ref
-      );
+      const quality = await checkImageQuality(url);
+
+      const existingIndex = persona.referenceImages.findIndex((r) => r.angle === angle);
+      let updatedRefs: Persona['referenceImages'];
+
+      if (existingIndex >= 0) {
+        updatedRefs = persona.referenceImages.map((ref, idx) =>
+          idx === existingIndex ? { ...ref, url, qualityReport: quality } : ref
+        );
+      } else {
+        const labels: Record<string, string> = {
+          front: 'Front View (หน้าตรง)',
+          angle_45: '45° Angle (มุมเฉียง 45 องศา)',
+          profile: 'Side Profile (ด้านข้าง 90 องศา)',
+          close_up: 'Close-Up (โคลสอัพใบหน้า)'
+        };
+        updatedRefs = [
+          ...persona.referenceImages,
+          {
+            id: `ref_${Date.now()}_${angle}`,
+            url,
+            angle,
+            label: labels[angle] || angle,
+            qualityReport: quality
+          }
+        ];
+      }
+
       onUpdatePersona({
         ...persona,
         referenceImages: updatedRefs,
-        avatarUrl: angle === 'front' ? url : persona.avatarUrl
+        avatarUrl: angle === 'front' ? url : (persona.avatarUrl || url)
       });
-      triggerToast('✅ บันทึกรูปถ่ายลงโทรศัพท์เรียบร้อยแล้ว!');
+      triggerToast('✅ บันทึกรูปถ่ายและตรวจคุณภาพเรียบร้อยแล้ว!');
     } catch (err) {
       console.error('Failed to compress turnaround image', err);
     }
+  };
+
+  const handleDeletePhoto = (angle: 'front' | 'angle_45' | 'profile' | 'close_up') => {
+    const updatedRefs = persona.referenceImages.filter((r) => r.angle !== angle);
+    onUpdatePersona({
+      ...persona,
+      referenceImages: updatedRefs
+    });
+    triggerToast('ลบรูปภาพอ้างอิงเรียบร้อยแล้ว');
   };
 
   const handleUpdateDna = (field: keyof Persona['faceDna'], value: string) => {
@@ -294,6 +333,23 @@ export const PersonaManager: React.FC<PersonaManagerProps> = ({
                 </div>
               )}
 
+              {persona.isDefault ? (
+                <span className="flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 font-bold">
+                  <Star className="w-3 h-3 fill-amber-400 text-amber-400" /> My AI Twin (ตัวละครหลัก)
+                </span>
+              ) : (
+                onSetMainPersona && (
+                  <button
+                    onClick={() => onSetMainPersona(persona.id)}
+                    title="ตั้งตัวละครนี้เป็นตัวละครหลัก (My AI Twin)"
+                    className="flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/40 font-semibold transition-all cursor-pointer"
+                  >
+                    <Star className="w-3 h-3 text-amber-400" />
+                    <span>ตั้งเป็นตัวละครหลัก</span>
+                  </button>
+                )
+              )}
+
               <span className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">
                 <ShieldCheck className="w-3 h-3" /> Identity Locked
               </span>
@@ -352,7 +408,7 @@ export const PersonaManager: React.FC<PersonaManagerProps> = ({
               }`}
             >
               <Camera className="w-3.5 h-3.5" />
-              <span>360° Turnaround</span>
+              <span>My AI Twin (รูป 3 มุม)</span>
             </button>
             <button
               onClick={() => setActiveTab('dna')}
@@ -398,54 +454,160 @@ export const PersonaManager: React.FC<PersonaManagerProps> = ({
         </div>
       )}
 
-      {/* Tab 1: 360 Turnaround Photos */}
+      {/* Tab 1: 3-Angle Real Face Photos (Priority 1: Front, 45°, Profile) */}
       {activeTab === 'photos' && (
-        <div>
-          <div className="flex items-start gap-2 bg-indigo-950/30 border border-indigo-500/20 rounded-xl p-3 mb-4 text-xs text-indigo-200">
+        <div className="space-y-4">
+          <div className="flex items-start gap-2 bg-indigo-950/30 border border-indigo-500/20 rounded-xl p-3 text-xs text-indigo-200">
             <Info className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-semibold text-indigo-100">เคล็ดลับการทำให้หน้าเหมือนจริงที่สุด:</p>
+            <div className="space-y-1">
+              <p className="font-semibold text-indigo-100">
+                ระบบล็อกหน้าจริง My AI Twin (3 มุมอ้างอิงหลัก):
+              </p>
               <p className="text-slate-300">
-                อัปโหลดรูปหน้าตัวคุณในแต่ละมุม (แสงธรรมชาติชัดเจน ไม่ใส่ฟิลเตอร์เบลอ) เพื่อให้ Veo/Google Flow จดจำมิติของโครงหน้าได้แม่นยำ
+                ควรอัปโหลดรูปหน้าจริงของคุณครบ 3 มุม (หน้าตรง, มุม 45 องศา, ด้านข้าง) แสงธรรมชาติ ไม่ใส่ฟิลเตอร์เบลอ เพื่อให้โมเดล AI ล็อกมิติโครงหน้าได้แม่นยำที่สุด
               </p>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {persona.referenceImages.map((ref) => (
-              <div
-                key={ref.id}
-                className="group relative bg-slate-950 rounded-xl border border-slate-800 p-2.5 overflow-hidden hover:border-indigo-500/50 transition-all flex flex-col justify-between"
-              >
-                <div>
-                  <div className="relative aspect-square rounded-lg overflow-hidden bg-slate-900 mb-2">
-                    <img
-                      src={ref.url}
-                      alt={ref.label}
-                      className="w-full h-full object-cover transition-transform group-hover:scale-105 duration-300"
-                    />
+          {/* The 3 Core Turnaround Slots (+ Optional close up) */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+            {[
+              {
+                angle: 'front' as const,
+                title: '1. หน้าตรง (Front View)',
+                desc: 'ตามองตรง แสงสว่างสม่ำเสมอ',
+                badge: 'จำเป็นที่สุด'
+              },
+              {
+                angle: 'angle_45' as const,
+                title: '2. มุมเฉียง 45° (Three-Quarter)',
+                desc: 'หันเฉียง 45 องศา เห็นสันกราม',
+                badge: 'แนะนำ'
+              },
+              {
+                angle: 'profile' as const,
+                title: '3. ด้านข้าง 90° (Side Profile)',
+                desc: 'หันข้าง 90 องศา เห็นสันจมูก',
+                badge: 'แนะนำ'
+              }
+            ].map((slot) => {
+              const ref = persona.referenceImages.find((r) => r.angle === slot.angle);
+              const quality = ref?.qualityReport;
+
+              return (
+                <div
+                  key={slot.angle}
+                  className="bg-slate-950 rounded-2xl border border-slate-800 p-3 flex flex-col justify-between hover:border-indigo-500/40 transition-all shadow-md group"
+                >
+                  <div>
+                    {/* Header of Card */}
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-bold text-white">{slot.title}</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
+                        {slot.badge}
+                      </span>
+                    </div>
+
+                    {/* Image Preview / Placeholder */}
+                    <div className="relative aspect-square rounded-xl overflow-hidden bg-slate-900 border border-slate-800/80 mb-2 flex items-center justify-center">
+                      {ref?.url ? (
+                        <img
+                          src={ref.url}
+                          alt={slot.title}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        />
+                      ) : (
+                        <div className="text-center p-3 text-slate-500 flex flex-col items-center gap-1.5">
+                          <Camera className="w-8 h-8 opacity-40 text-slate-400" />
+                          <span className="text-[11px] text-slate-400 font-medium">{slot.desc}</span>
+                        </div>
+                      )}
+
+                      {/* Quality Score Badge overlay */}
+                      {quality && (
+                        <div className={`absolute top-2 right-2 px-2 py-0.5 rounded-md font-bold text-[10px] backdrop-blur-md shadow-lg ${
+                          quality.score >= 75 ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/40' :
+                          quality.score >= 50 ? 'bg-amber-950/80 text-amber-300 border border-amber-500/40' :
+                          'bg-rose-950/80 text-rose-300 border border-rose-500/40'
+                        }`}>
+                          คะแนน {quality.score}/100
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Quality Insights Details */}
+                    {quality ? (
+                      <div className="bg-slate-900/80 rounded-xl p-2 mb-2 text-[10px] space-y-1 text-slate-300 border border-slate-800/60">
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">ความคมชัด:</span>
+                          <span className="font-semibold text-slate-200">
+                            {quality.sharpness === 'sharp' ? 'คมชัดดี ✅' : quality.sharpness === 'acceptable' ? 'พอใช้ได้ ⚡' : 'เบลอ/สั่น ⚠️'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">แสงสว่าง:</span>
+                          <span className="font-semibold text-slate-200">
+                            {quality.brightness === 'good' ? 'เหมาะสม ✅' : quality.brightness === 'too_dark' ? 'มืดไป ⚠️' : 'สว่างจ้าไป ⚠️'}
+                          </span>
+                        </div>
+                        {quality.warnings.length > 0 && (
+                          <div className="text-amber-400 text-[9px] pt-0.5">
+                            ⚠️ {quality.warnings[0]}
+                          </div>
+                        )}
+                      </div>
+                    ) : ref?.url ? (
+                      <div className="text-[10px] text-slate-400 text-center mb-2">
+                        รูปถ่ายพร้อมส่งต่อเป็น Master Reference
+                      </div>
+                    ) : (
+                      <div className="text-[10px] text-slate-500 text-center mb-2">
+                        ยังไม่มีรูปอ้างอิงมุมนี้
+                      </div>
+                    )}
                   </div>
-                  <div className="text-center mb-2">
-                    <span className="text-[11px] font-semibold text-slate-200 block truncate">
-                      {ref.label}
-                    </span>
-                    <span className="text-[10px] text-indigo-400 capitalize">{ref.angle.replace('_', ' ')}</span>
+
+                  {/* Actions (Upload + Delete) */}
+                  <div className="flex items-center gap-1.5 pt-1">
+                    <label className="flex-1 py-2 px-2 bg-indigo-600/30 hover:bg-indigo-600 border border-indigo-500/40 rounded-xl text-indigo-200 hover:text-white text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors active:scale-95">
+                      <Camera className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>{ref?.url ? 'เปลี่ยนรูป' : 'ถ่ายรูป / อัปโหลด'}</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => handleFileUpload(slot.angle, e)}
+                      />
+                    </label>
+
+                    {ref?.url && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeletePhoto(slot.angle)}
+                        title="ลบรูปอ้างอิงมุมนี้"
+                        className="p-2 bg-red-950/40 hover:bg-red-900/60 border border-red-500/30 rounded-xl text-red-400 transition-colors cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
+              );
+            })}
+          </div>
 
-                {/* Explicit mobile-friendly button */}
-                <label className="w-full py-2 px-2 bg-indigo-600/30 hover:bg-indigo-600 border border-indigo-500/40 rounded-lg text-indigo-200 hover:text-white text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors active:scale-95">
-                  <Camera className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>{ref.url ? 'แตะเปลี่ยนรูป' : 'ถ่ายรูป / อัปโหลด'}</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => handleFileUpload(ref.angle, e)}
-                  />
-                </label>
-              </div>
-            ))}
+          {/* Privacy & Realistic Disclaimer Notice */}
+          <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-[11px] text-slate-400 space-y-1">
+            <div className="flex items-center gap-1.5 text-slate-300 font-semibold">
+              <Lock className="w-3.5 h-3.5 text-emerald-400" />
+              <span>ความปลอดภัยและความเป็นส่วนตัว (Privacy Notice):</span>
+            </div>
+            <p>
+              รูปถ่ายใบหน้าจริงของคุณได้รับการจัดเก็บอยู่บนเครื่องโทรศัพท์/เบราว์เซอร์นี้เท่านั้น (IndexedDB) ไม่มีการอัปโหลดสู่ระบบคลาวด์ภายนอกจนกว่าคุณจะกดส่งต่อหรือสั่งสร้างวิดีโอ
+            </p>
+            <p className="text-slate-500 text-[10px]">
+              * หมายเหตุ: คุณภาพความเหมือนจริงขึ้นอยู่กับขีดความสามารถของโมเดลวิดีโอ (Veo/Flow) ระบบช่วยล็อก DNA และส่งภาพ Reference เพื่อความแม่นยำสูงสุด
+            </p>
           </div>
         </div>
       )}

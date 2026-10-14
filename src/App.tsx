@@ -3,6 +3,7 @@ import { Header } from './components/Header';
 import { PersonaManager } from './components/PersonaManager';
 import { DirectorStudio } from './components/DirectorStudio';
 import { StoryboardTimeline } from './components/StoryboardTimeline';
+import { EasyStoryCreator } from './components/EasyStoryCreator';
 import { ApiKeyModal } from './components/ApiKeyModal';
 import { FlowIntegrationHelper } from './components/FlowIntegrationHelper';
 import { MobileQrModal } from './components/MobileQrModal';
@@ -12,7 +13,7 @@ import type { Persona, ShotConfig } from './types';
 import { INITIAL_PERSONAS, INITIAL_PROJECT } from './services/mockData';
 import { DEFAULT_NEGATIVE_PROMPT, compileVeoPrompt } from './services/promptCompiler';
 import { idbGet, idbSet, safeLocalStorageSet } from './services/storage';
-import { User, Clapperboard, Film, Copy, Check, ExternalLink } from 'lucide-react';
+import { User, Clapperboard, Film, Copy, Check, ExternalLink, Sparkles } from 'lucide-react';
 
 export function App() {
   // Load saved state or fall back to defaults
@@ -59,8 +60,11 @@ export function App() {
   const [isDockMode, setIsDockMode] = useState(false);
   const [isStorageReady, setIsStorageReady] = useState(false);
 
-  // Mobile navigation tab state
-  const [mobileTab, setMobileTab] = useState<'twin' | 'director' | 'story'>('director');
+  // Desktop view mode ('easy' vs 'studio')
+  const [viewMode, setViewMode] = useState<'easy' | 'studio'>('easy');
+
+  // Mobile navigation tab state ('easy' | 'twin' | 'director' | 'story')
+  const [mobileTab, setMobileTab] = useState<'easy' | 'twin' | 'director' | 'story'>('easy');
   const [mobileCopied, setMobileCopied] = useState(false);
 
   const localWifiIp = '192.168.1.47';
@@ -119,6 +123,23 @@ export function App() {
   const activePersona = personas.find((p) => p.id === activePersonaId) || personas[0];
   const activeShot = shots.find((s) => s.id === activeShotId) || shots[0];
   const activeShotIndex = shots.findIndex((s) => s.id === activeShotId);
+
+  const handleSetMainPersona = (id: string) => {
+    setPersonas((prev) =>
+      prev.map((p) => ({
+        ...p,
+        isDefault: p.id === id
+      }))
+    );
+    setActivePersonaId(id);
+  };
+
+  const handleApplyEasyStoryboard = (newShots: ShotConfig[]) => {
+    setShots(newShots);
+    if (newShots.length > 0) {
+      setActiveShotId(newShots[0].id);
+    }
+  };
 
   const handleUpdatePersona = (updated: Persona) => {
     setPersonas((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
@@ -234,39 +255,50 @@ export function App() {
 
       {/* Mobile Segmented Tab Bar (Hidden on Tablets & Desktops) */}
       <div className="sm:hidden px-3 pt-3">
-        <div className="grid grid-cols-3 bg-slate-900 p-1 rounded-xl border border-slate-800 text-xs">
+        <div className="grid grid-cols-4 bg-slate-900 p-1 rounded-xl border border-slate-800 text-[11px]">
+          <button
+            onClick={() => setMobileTab('easy')}
+            className={`py-2 rounded-lg font-semibold flex flex-col items-center justify-center gap-0.5 transition-all ${
+              mobileTab === 'easy'
+                ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+            <span>สร้างเรื่อง</span>
+          </button>
           <button
             onClick={() => setMobileTab('twin')}
-            className={`py-2 rounded-lg font-semibold flex items-center justify-center gap-1.5 transition-all ${
+            className={`py-2 rounded-lg font-semibold flex flex-col items-center justify-center gap-0.5 transition-all ${
               mobileTab === 'twin'
                 ? 'bg-indigo-600 text-white shadow'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
             <User className="w-3.5 h-3.5" />
-            <span>1. หน้าเรา</span>
+            <span>หน้าเรา</span>
           </button>
           <button
             onClick={() => setMobileTab('director')}
-            className={`py-2 rounded-lg font-semibold flex items-center justify-center gap-1.5 transition-all ${
+            className={`py-2 rounded-lg font-semibold flex flex-col items-center justify-center gap-0.5 transition-all ${
               mobileTab === 'director'
                 ? 'bg-indigo-600 text-white shadow'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
             <Clapperboard className="w-3.5 h-3.5" />
-            <span>2. ผู้กำกับ</span>
+            <span>ผู้กำกับ</span>
           </button>
           <button
             onClick={() => setMobileTab('story')}
-            className={`py-2 rounded-lg font-semibold flex items-center justify-center gap-1.5 transition-all ${
+            className={`py-2 rounded-lg font-semibold flex flex-col items-center justify-center gap-0.5 transition-all ${
               mobileTab === 'story'
                 ? 'bg-indigo-600 text-white shadow'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
             <Film className="w-3.5 h-3.5" />
-            <span>3. สตอรี่</span>
+            <span>สตอรี่</span>
           </button>
         </div>
       </div>
@@ -277,21 +309,70 @@ export function App() {
           isDockMode ? 'max-w-2xl' : 'max-w-7xl'
         }`}
       >
+        {/* Desktop View Mode Switcher */}
+        <div className="hidden sm:flex items-center justify-between bg-slate-900/60 p-1.5 rounded-2xl border border-slate-800">
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setViewMode('easy')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+                viewMode === 'easy'
+                  ? 'bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 text-white shadow-md shadow-indigo-500/20'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+              <span>⚡ Easy Story Creator (สร้างเรื่อง 3 ช็อตแบบด่วน)</span>
+            </button>
+            <button
+              onClick={() => setViewMode('studio')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+                viewMode === 'studio'
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+              }`}
+            >
+              <Clapperboard className="w-3.5 h-3.5 text-indigo-400" />
+              <span>🎬 Director Studio & Timeline (สตูดิโอผู้กำกับเต็มรูปแบบ)</span>
+            </button>
+          </div>
+
+          <div className="text-[11px] text-slate-400 pr-3 flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span>My AI Twin: <strong className="text-white">{activePersona.name}</strong></span>
+          </div>
+        </div>
+
+        {/* Easy Mode Section (visible when mobileTab === 'easy' on mobile, or viewMode === 'easy' on desktop) */}
+        <section className={`${mobileTab !== 'easy' ? 'hidden' : ''} ${viewMode === 'easy' ? 'sm:block' : 'sm:hidden'}`}>
+          <EasyStoryCreator
+            personas={personas}
+            activePersona={activePersona}
+            onSelectPersona={setActivePersonaId}
+            onApplyStoryboard={handleApplyEasyStoryboard}
+            onOpenDirectorStudio={() => {
+              setViewMode('studio');
+              setMobileTab('director');
+            }}
+            apiKey={apiKey}
+          />
+        </section>
+
         {/* Section 1: Character & Face Consistency Studio */}
-        <section className={`${mobileTab !== 'twin' ? 'hidden sm:block' : ''}`}>
+        <section className={`${mobileTab !== 'twin' ? 'hidden' : ''} ${viewMode === 'studio' ? 'sm:block' : (viewMode === 'easy' ? 'sm:block' : 'sm:hidden')}`}>
           <PersonaManager
             persona={activePersona}
             allPersonas={personas}
             onSelectPersona={setActivePersonaId}
             onOpenCreatePersonaModal={() => setIsCreateFriendModalOpen(true)}
             onUpdatePersona={handleUpdatePersona}
+            onSetMainPersona={handleSetMainPersona}
             onDeletePersona={handleDeletePersona}
             apiKey={apiKey}
           />
         </section>
 
         {/* Section 2: Director Studio & Live Veo Prompt Generator */}
-        <section className={`${mobileTab !== 'director' ? 'hidden sm:block' : ''}`}>
+        <section className={`${mobileTab !== 'director' ? 'hidden' : ''} ${viewMode === 'studio' ? 'sm:block' : 'sm:hidden'}`}>
           <DirectorStudio
             activeShot={activeShot}
             persona={activePersona}
@@ -305,7 +386,7 @@ export function App() {
         </section>
 
         {/* Section 3: Storyboard Timeline */}
-        <section className={`${mobileTab !== 'story' ? 'hidden sm:block' : ''}`}>
+        <section className={`${mobileTab !== 'story' ? 'hidden' : ''} ${viewMode === 'studio' ? 'sm:block' : 'sm:hidden'}`}>
           <StoryboardTimeline
             shots={shots}
             activeShotId={activeShotId}

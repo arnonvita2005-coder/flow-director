@@ -21,10 +21,12 @@ export function App() {
     if (saved) {
       try {
         const parsed: Persona[] = JSON.parse(saved);
-        return parsed.map((p) => ({
-          ...p,
-          props: p.props && p.props.length > 0 ? p.props : INITIAL_PERSONAS[0].props
-        }));
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map((p) => ({
+            ...p,
+            props: p.props || []
+          }));
+        }
       } catch (e) {
         return INITIAL_PERSONAS;
       }
@@ -55,6 +57,7 @@ export function App() {
   const [isCreateFriendModalOpen, setIsCreateFriendModalOpen] = useState(false);
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
   const [isDockMode, setIsDockMode] = useState(false);
+  const [isStorageReady, setIsStorageReady] = useState(false);
 
   // Mobile navigation tab state
   const [mobileTab, setMobileTab] = useState<'twin' | 'director' | 'story'>('director');
@@ -67,11 +70,11 @@ export function App() {
     async function loadFromDB() {
       try {
         const idbPersonas = await idbGet<Persona[]>('flow_director_personas');
-        if (idbPersonas && idbPersonas.length > 0) {
+        if (idbPersonas && Array.isArray(idbPersonas) && idbPersonas.length > 0) {
           setPersonas(idbPersonas);
         }
         const idbShots = await idbGet<ShotConfig[]>('flow_director_shots');
-        if (idbShots && idbShots.length > 0) {
+        if (idbShots && Array.isArray(idbShots) && idbShots.length > 0) {
           setShots(idbShots);
         }
         const idbKey = await idbGet<string>('flow_director_gemini_api_key');
@@ -80,23 +83,28 @@ export function App() {
         }
       } catch (e) {
         console.warn('[Storage] Failed to load from IndexedDB', e);
+      } finally {
+        setIsStorageReady(true);
       }
     }
     loadFromDB();
   }, []);
 
-  // Sync to IndexedDB and localStorage safely
+  // Sync to IndexedDB and localStorage safely ONLY AFTER storage is ready
   useEffect(() => {
+    if (!isStorageReady) return;
     idbSet('flow_director_personas', personas);
     safeLocalStorageSet('flow_director_personas', JSON.stringify(personas));
-  }, [personas]);
+  }, [personas, isStorageReady]);
 
   useEffect(() => {
+    if (!isStorageReady) return;
     idbSet('flow_director_shots', shots);
     safeLocalStorageSet('flow_director_shots', JSON.stringify(shots));
-  }, [shots]);
+  }, [shots, isStorageReady]);
 
   useEffect(() => {
+    if (!isStorageReady) return;
     if (apiKey) {
       idbSet('flow_director_gemini_api_key', apiKey);
       safeLocalStorageSet('flow_director_gemini_api_key', apiKey);
@@ -106,7 +114,7 @@ export function App() {
         localStorage.removeItem('flow_director_gemini_api_key');
       } catch {}
     }
-  }, [apiKey]);
+  }, [apiKey, isStorageReady]);
 
   const activePersona = personas.find((p) => p.id === activePersonaId) || personas[0];
   const activeShot = shots.find((s) => s.id === activeShotId) || shots[0];
@@ -118,11 +126,22 @@ export function App() {
 
   const handleCreateFriend = (newPersona: Persona) => {
     setPersonas((prev) => [...prev, newPersona]);
+    setActivePersonaId(newPersona.id);
+    setMobileTab('twin');
     const currentSecondary = activeShot.secondaryPersonaIds || [];
     handleUpdateShot({
       ...activeShot,
       secondaryPersonaIds: [...currentSecondary, newPersona.id]
     });
+  };
+
+  const handleDeletePersona = (id: string) => {
+    if (personas.length <= 1) return;
+    const remaining = personas.filter((p) => p.id !== id);
+    setPersonas(remaining);
+    if (activePersonaId === id) {
+      setActivePersonaId(remaining[0].id);
+    }
   };
 
   const handleUpdateShot = (updated: ShotConfig) => {
@@ -262,7 +281,11 @@ export function App() {
         <section className={`${mobileTab !== 'twin' ? 'hidden sm:block' : ''}`}>
           <PersonaManager
             persona={activePersona}
+            allPersonas={personas}
+            onSelectPersona={setActivePersonaId}
+            onOpenCreatePersonaModal={() => setIsCreateFriendModalOpen(true)}
             onUpdatePersona={handleUpdatePersona}
+            onDeletePersona={handleDeletePersona}
             apiKey={apiKey}
           />
         </section>

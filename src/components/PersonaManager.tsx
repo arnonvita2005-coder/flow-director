@@ -1,7 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   User, 
-  Upload, 
   Shirt, 
   Plus, 
   Trash2, 
@@ -12,7 +11,9 @@ import {
   Sparkles,
   RefreshCw,
   Package,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Edit2,
+  UserPlus
 } from 'lucide-react';
 import type { Persona, WardrobePreset, PropAsset } from '../types';
 import { analyzeFaceWithGemini } from '../services/promptCompiler';
@@ -20,13 +21,21 @@ import { compressImage } from '../services/storage';
 
 interface PersonaManagerProps {
   persona: Persona;
+  allPersonas: Persona[];
+  onSelectPersona: (personaId: string) => void;
+  onOpenCreatePersonaModal: () => void;
   onUpdatePersona: (updated: Persona) => void;
+  onDeletePersona?: (personaId: string) => void;
   apiKey?: string;
 }
 
 export const PersonaManager: React.FC<PersonaManagerProps> = ({
   persona,
+  allPersonas,
+  onSelectPersona,
+  onOpenCreatePersonaModal,
   onUpdatePersona,
+  onDeletePersona,
   apiKey
 }) => {
   const [activeTab, setActiveTab] = useState<'photos' | 'dna' | 'wardrobe' | 'props'>('photos');
@@ -38,6 +47,29 @@ export const PersonaManager: React.FC<PersonaManagerProps> = ({
   const [newPropPhoto, setNewPropPhoto] = useState('');
   const [isScanningFace, setIsScanningFace] = useState(false);
   const [scanSuccessMessage, setScanSuccessMessage] = useState('');
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [tempName, setTempName] = useState(persona.name);
+  const [saveToast, setSaveToast] = useState('');
+
+  // Keep tempName in sync when persona changes
+  useEffect(() => {
+    setTempName(persona.name);
+  }, [persona.id, persona.name]);
+
+  const triggerToast = (msg: string) => {
+    setSaveToast(msg);
+    setTimeout(() => setSaveToast(''), 3500);
+  };
+
+  const handleSaveName = () => {
+    if (!tempName.trim()) return;
+    onUpdatePersona({
+      ...persona,
+      name: tempName.trim()
+    });
+    setIsEditingName(false);
+    triggerToast(`✅ บันทึกชื่อ "${tempName.trim()}" เรียบร้อยแล้ว!`);
+  };
 
   const handleFileUpload = async (angle: 'front' | 'angle_45' | 'profile' | 'close_up', e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -53,6 +85,7 @@ export const PersonaManager: React.FC<PersonaManagerProps> = ({
         referenceImages: updatedRefs,
         avatarUrl: angle === 'front' ? url : persona.avatarUrl
       });
+      triggerToast('✅ บันทึกรูปถ่ายลงโทรศัพท์เรียบร้อยแล้ว!');
     } catch (err) {
       console.error('Failed to compress turnaround image', err);
     }
@@ -142,6 +175,7 @@ export const PersonaManager: React.FC<PersonaManagerProps> = ({
       ...persona,
       props: [...(persona.props || []), newProp]
     });
+    triggerToast(`✅ บันทึกอุปกรณ์ "${newPropName}" ลงเครื่องเรียบร้อยแล้ว!`);
 
     setNewPropName('');
     setNewPropDesc('');
@@ -153,10 +187,58 @@ export const PersonaManager: React.FC<PersonaManagerProps> = ({
       ...persona,
       props: (persona.props || []).filter((p) => p.id !== id)
     });
+    triggerToast('ลบอุปกรณ์เรียบร้อยแล้ว');
   };
 
   return (
-    <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl">
+    <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl relative">
+      {/* Real-time Save Toast Banner */}
+      {saveToast && (
+        <div className="fixed top-4 right-4 z-50 bg-emerald-600 text-white px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-2 text-xs font-bold animate-bounce">
+          <Check className="w-4 h-4 shrink-0" />
+          <span>{saveToast}</span>
+        </div>
+      )}
+
+      {/* 1. Character Selector Carousel (Easy 1-tap switching between Me and Friends) */}
+      <div className="mb-4 bg-slate-950 p-2 rounded-xl border border-slate-800 flex items-center justify-between gap-2 overflow-x-auto">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-slate-400 pl-1 shrink-0">ตัวละคร:</span>
+          <div className="flex items-center gap-1.5">
+            {allPersonas.map((p) => {
+              const isCurrent = p.id === persona.id;
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => onSelectPersona(p.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all shrink-0 cursor-pointer ${
+                    isCurrent
+                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20 ring-1 ring-indigo-400'
+                      : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
+                  }`}
+                >
+                  <img
+                    src={p.avatarUrl || p.referenceImages[0]?.url}
+                    alt={p.name}
+                    className="w-4 h-4 rounded-full object-cover"
+                  />
+                  <span>{p.name}</span>
+                  {p.isDefault && <span className="text-[10px] opacity-75">(เรา)</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <button
+          onClick={onOpenCreatePersonaModal}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-purple-600/30 text-purple-300 hover:bg-purple-600/50 border border-purple-500/40 shrink-0 cursor-pointer transition-colors"
+        >
+          <UserPlus className="w-3.5 h-3.5" />
+          <span>+ เพิ่มเพื่อน</span>
+        </button>
+      </div>
+
       {/* Top Profile Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-800 pb-4 mb-5 gap-3">
         <div className="flex items-center gap-3">
@@ -168,12 +250,69 @@ export const PersonaManager: React.FC<PersonaManagerProps> = ({
             />
           </div>
           <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-base font-bold text-white">{persona.name}</h2>
+            <div className="flex items-center gap-2 flex-wrap mb-1">
+              {isEditingName ? (
+                <div className="flex items-center gap-1">
+                  <input
+                    type="text"
+                    value={tempName}
+                    onChange={(e) => setTempName(e.target.value)}
+                    className="bg-slate-950 border border-indigo-500 rounded-lg px-2.5 py-1 text-sm text-white font-bold focus:outline-none"
+                    placeholder="พิมพ์ชื่อตัวละคร"
+                    autoFocus
+                  />
+                  <button
+                    onClick={handleSaveName}
+                    className="px-2.5 py-1 bg-emerald-600 text-white rounded-lg text-xs font-bold hover:bg-emerald-500 cursor-pointer"
+                  >
+                    บันทึก
+                  </button>
+                  <button
+                    onClick={() => {
+                      setTempName(persona.name);
+                      setIsEditingName(false);
+                    }}
+                    className="px-2 py-1 bg-slate-800 text-slate-400 rounded-lg text-xs hover:text-white cursor-pointer"
+                  >
+                    ยกเลิก
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base font-bold text-white">{persona.name}</h2>
+                  <button
+                    onClick={() => {
+                      setTempName(persona.name);
+                      setIsEditingName(true);
+                    }}
+                    title="แตะเพื่อเปลี่ยนชื่อตัวละครนี้"
+                    className="flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800/80 hover:bg-slate-700 text-indigo-300 text-[11px] font-medium transition-colors cursor-pointer"
+                  >
+                    <Edit2 className="w-3 h-3" />
+                    <span>เปลี่ยนชื่อ</span>
+                  </button>
+                </div>
+              )}
+
               <span className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">
                 <ShieldCheck className="w-3 h-3" /> Identity Locked
               </span>
+              <span className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 font-medium">
+                💾 บันทึกในเครื่องแล้ว
+              </span>
+
+              {!persona.isDefault && onDeletePersona && (
+                <button
+                  onClick={() => onDeletePersona(persona.id)}
+                  title="ลบตัวละครเพื่อนคนนี้"
+                  className="flex items-center gap-1 px-2 py-0.5 rounded bg-red-950/40 text-red-400 hover:bg-red-900/50 border border-red-500/30 text-[11px] transition-colors cursor-pointer"
+                >
+                  <Trash2 className="w-3 h-3" />
+                  <span>ลบตัวละคร</span>
+                </button>
+              )}
             </div>
+
             <p className="text-xs text-slate-400">
               ชุดที่ใส่อยู่:{' '}
               <span className="text-indigo-300 font-medium">
@@ -276,31 +415,35 @@ export const PersonaManager: React.FC<PersonaManagerProps> = ({
             {persona.referenceImages.map((ref) => (
               <div
                 key={ref.id}
-                className="group relative bg-slate-950 rounded-xl border border-slate-800 p-2 overflow-hidden hover:border-indigo-500/50 transition-all"
+                className="group relative bg-slate-950 rounded-xl border border-slate-800 p-2.5 overflow-hidden hover:border-indigo-500/50 transition-all flex flex-col justify-between"
               >
-                <div className="relative aspect-square rounded-lg overflow-hidden bg-slate-900 mb-2">
-                  <img
-                    src={ref.url}
-                    alt={ref.label}
-                    className="w-full h-full object-cover transition-transform group-hover:scale-105 duration-300"
-                  />
-                  <label className="absolute inset-0 bg-slate-950/70 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center cursor-pointer transition-opacity text-white text-xs gap-1">
-                    <Upload className="w-4 h-4 text-indigo-400" />
-                    <span>เปลี่ยนรูป</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => handleFileUpload(ref.angle, e)}
+                <div>
+                  <div className="relative aspect-square rounded-lg overflow-hidden bg-slate-900 mb-2">
+                    <img
+                      src={ref.url}
+                      alt={ref.label}
+                      className="w-full h-full object-cover transition-transform group-hover:scale-105 duration-300"
                     />
-                  </label>
+                  </div>
+                  <div className="text-center mb-2">
+                    <span className="text-[11px] font-semibold text-slate-200 block truncate">
+                      {ref.label}
+                    </span>
+                    <span className="text-[10px] text-indigo-400 capitalize">{ref.angle.replace('_', ' ')}</span>
+                  </div>
                 </div>
-                <div className="text-center">
-                  <span className="text-[11px] font-semibold text-slate-300 block truncate">
-                    {ref.label}
-                  </span>
-                  <span className="text-[10px] text-indigo-400 capitalize">{ref.angle.replace('_', ' ')}</span>
-                </div>
+
+                {/* Explicit mobile-friendly button */}
+                <label className="w-full py-2 px-2 bg-indigo-600/30 hover:bg-indigo-600 border border-indigo-500/40 rounded-lg text-indigo-200 hover:text-white text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors active:scale-95">
+                  <Camera className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>{ref.url ? 'แตะเปลี่ยนรูป' : 'ถ่ายรูป / อัปโหลด'}</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => handleFileUpload(ref.angle, e)}
+                  />
+                </label>
               </div>
             ))}
           </div>

@@ -11,58 +11,101 @@ export async function compressImage(
   maxHeight = 720,
   quality = 0.82
 ): Promise<string> {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
+    if (typeof input === 'string' && !input.startsWith('data:image')) {
+      resolve(input);
+      return;
+    }
+
     const img = new Image();
-    img.crossOrigin = 'anonymous';
+    let objectUrl = '';
+
+    const cleanup = () => {
+      if (objectUrl) {
+        try {
+          URL.revokeObjectURL(objectUrl);
+        } catch {}
+      }
+    };
 
     const process = () => {
-      let width = img.width;
-      let height = img.height;
-
-      if (width > maxWidth || height > maxHeight) {
-        if (width / height > maxWidth / maxHeight) {
-          height = Math.round((height * maxWidth) / width);
-          width = maxWidth;
-        } else {
-          width = Math.round((width * maxHeight) / height);
-          height = maxHeight;
-        }
-      }
-
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.max(1, width);
-      canvas.height = Math.max(1, height);
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        resolve(typeof input === 'string' ? input : '');
-        return;
-      }
-
-      ctx.fillStyle = '#0f172a';
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       try {
+        let width = img.naturalWidth || img.width;
+        let height = img.naturalHeight || img.height;
+
+        if (!width || !height) {
+          cleanup();
+          resolve(typeof input === 'string' ? input : '');
+          return;
+        }
+
+        if (width > maxWidth || height > maxHeight) {
+          if (width / height > maxWidth / maxHeight) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          } else {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, width);
+        canvas.height = Math.max(1, height);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          cleanup();
+          resolve(typeof input === 'string' ? input : '');
+          return;
+        }
+
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         const compressed = canvas.toDataURL('image/jpeg', quality);
+        cleanup();
         resolve(compressed);
       } catch (err) {
-        resolve(typeof input === 'string' ? input : '');
+        console.warn('Canvas compression error, falling back', err);
+        cleanup();
+        if (typeof input === 'string') {
+          resolve(input);
+        } else {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve((e.target?.result as string) || '');
+          reader.onerror = () => resolve('');
+          reader.readAsDataURL(input);
+        }
       }
     };
 
     img.onload = () => process();
     img.onerror = () => {
-      if (typeof input === 'string') resolve(input);
-      else reject(new Error('Failed to load image'));
+      cleanup();
+      if (typeof input === 'string') {
+        resolve(input);
+      } else {
+        const reader = new FileReader();
+        reader.onload = (ev) => resolve((ev.target?.result as string) || '');
+        reader.onerror = () => resolve('');
+        reader.readAsDataURL(input);
+      }
     };
 
     if (typeof input === 'string') {
       img.src = input;
     } else {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        img.src = (e.target?.result as string) || '';
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(input);
+      try {
+        objectUrl = URL.createObjectURL(input);
+        img.src = objectUrl;
+      } catch {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          img.src = (e.target?.result as string) || '';
+        };
+        reader.onerror = () => resolve('');
+        reader.readAsDataURL(input);
+      }
     }
   });
 }

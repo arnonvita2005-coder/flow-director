@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Sparkles, 
   Camera, 
@@ -60,6 +60,19 @@ export const DirectorStudio: React.FC<DirectorStudioProps> = ({
   const [copiedPrompt, setCopiedPrompt] = useState(false);
   const [copiedNegative, setCopiedNegative] = useState(false);
 
+  // Sync with activeShot when switching shots
+  useEffect(() => {
+    setNaturalInput(activeShot.userPrompt || '');
+  }, [activeShot.id, activeShot.userPrompt]);
+
+  const handleInputChange = (val: string) => {
+    setNaturalInput(val);
+    onUpdateShot({
+      ...activeShot,
+      userPrompt: val
+    });
+  };
+
   // Compile prompt live whenever attributes change with multi-character support
   const currentCompiledPrompt = compileVeoPrompt(
     activeShot,
@@ -107,6 +120,10 @@ export const DirectorStudio: React.FC<DirectorStudioProps> = ({
 
   const handleSelectTemplate = (templatePrompt: string) => {
     setNaturalInput(templatePrompt);
+    onUpdateShot({
+      ...activeShot,
+      userPrompt: templatePrompt
+    });
   };
 
   return (
@@ -138,7 +155,7 @@ export const DirectorStudio: React.FC<DirectorStudioProps> = ({
             <textarea
               rows={2}
               value={naturalInput}
-              onChange={(e) => setNaturalInput(e.target.value)}
+              onChange={(e) => handleInputChange(e.target.value)}
               placeholder="พิมพ์สิ่งที่คุณต้องการ เช่น: 'ผมเดินออกจากตึกสวมสูท ถือโทรศัพท์ แดดยามเย็นส่องเข้าด้านหลัง กล้องเคลื่อนที่ตามด้านหน้า'..."
               className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 resize-none"
             />
